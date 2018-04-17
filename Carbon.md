@@ -1,6 +1,6 @@
 Drivers of carbon recovery in a secondary forested landscape of West Africa
 ================
-Annie Koutouan, Bruno Hérault & Justin Kassi
+Anny E. N'Guessan, Bruno Hérault & Justin Kassi
 4/17/2018
 
 -   [Introduction](#introduction)

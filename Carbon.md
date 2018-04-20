@@ -124,10 +124,11 @@ data3[data3$categorie=="J 1-10 ans",]$categorie<-"a. Secondary < 11yr"
 data3[data3$categorie=="J 11-20 ans",]$categorie<-"b. Secondary 11-20 yr"
 data3[data3$categorie=="J 21-30 ans",]$categorie<-"c. Secondary 21-30 yr"
 data3[data3$categorie=="J 31-40 ans",]$categorie<-"d. Secondary > 30yr"
-data3[data3$categorie=="foretanci ",]$categorie<-"f. Old Growth"
+data3[data3$categorie=="foretanci ",]$categorie<-"e. Old Growth"
 data3[data3$categorie=="foretexpl ",]$categorie<-"e. Logged"
+#### dropping logged forests
+data3<-data3[!data3$categorie=="e. Logged",]
 data3$categorie<-as.factor(data3$categorie)
-
 # kruskal.test(data3$AGB,data3$categorie)
 # kruskal.test(data3$BA,data3$categorie)
 # kruskal.test(data3$DG,data3$categorie)
@@ -154,8 +155,10 @@ p + facet_wrap( ~ var, scales="free")
 ### Forest recovery rates
 
 ``` r
-agbmax<-quantile(data3[data3$categorie %in% c("e. Logged","f. Old Growth"),]$AGB, 0.75)
-data4<-data3[!data3$categorie %in% c("e. Logged","f. Old Growth"),]
+agbmax<-quantile(data3[data3$categorie %in% c("e. Old Growth"),]$AGB, 0.75)
+data4<-data3[!data3$categorie %in% c("e. Old Growth"),]
+data5<-data3[data3$categorie %in% c("e. Old Growth"),]
+data5$age<-200
 data4$lambda<- -log(1-(data4$AGB/agbmax))/((data4$age/10)^2)
 q<-quantile(data4$lambda, probs=c(0.05, 0.5, 0.95))
 ```
@@ -165,10 +168,10 @@ library(ggplot2)
 age<-1:200
 newdata <- data.frame(age=age, med=agbmax*(1-exp(-q[2]*((age/10)^2))), q05=agbmax*(1-exp(-q[1]*((age/10)^2))),
                     q95= agbmax*(1-exp(-q[3]*((age/10)^2))))
-
 ggplot() +
   geom_ribbon(data=newdata, aes(x=age, ymin = q05, ymax = q95), alpha = .25)+
   geom_point(data=data4, aes(x = age, y=AGB))+
+  geom_point(data=data5, aes(x=age, y=AGB, colour="red"))+
   scale_y_sqrt()+
   scale_x_log10()+
   xlab("Age of Secondary Forest (yr)") + ylab("Aboveground Biomass (T/ha)")
@@ -177,6 +180,194 @@ ggplot() +
 ![](Carbon_files/figure-markdown_github/fig2-1.png)
 
 ### Environmental control on recovery rates
+
+``` r
+str(data4)
+```
+
+    ## 'data.frame':    89 obs. of  17 variables:
+    ##  $ plot                : int  1 2 4 6 7 8 10 12 17 18 ...
+    ##  $ categorie           : Factor w/ 5 levels "a. Secondary < 11yr",..: 2 1 3 3 1 4 2 4 2 4 ...
+    ##  $ age                 : int  11 3 26 21 5 32 17 34 20 35 ...
+    ##  $ nbr_remanent        : int  5 7 16 1 7 2 1 2 6 0 ...
+    ##  $ shannon             : num  2.42 1.84 3.16 3.52 1.88 ...
+    ##  $ Proximiteforesti.re.: int  300 500 150 10 500 10 50 10 210 10 ...
+    ##  $ Densiteforesti.re.  : int  3 0 1 5 1 5 4 7 4 4 ...
+    ##  $ Altitude            : int  135 96 106 118 124 120 122 99 129 119 ...
+    ##  $ Annedeculture       : int  2 2 3 10 3 3 3 6 10 10 ...
+    ##  $ Typedesol           : Factor w/ 2 levels "solferralitique",..: 1 2 2 1 1 1 1 1 1 1 ...
+    ##  $ Topographie         : Factor w/ 7 levels "bas fond","bas pente",..: 7 1 6 5 5 5 7 5 5 5 ...
+    ##  $ Precedentcultural   : Factor w/ 5 levels "cacao","igname",..: 3 5 1 1 3 1 3 1 1 1 ...
+    ##  $ AGB                 : num  12.729 0.753 146.648 52.435 3.846 ...
+    ##  $ N                   : num  1285 285 1765 1790 1485 ...
+    ##  $ BA                  : num  7.71 2.12 48.26 17.61 4.35 ...
+    ##  $ DG                  : num  8.74 9.73 18.66 11.19 6.11 ...
+    ##  $ lambda              : num  0.0279 0.0219 0.0714 0.0334 0.0404 ...
+
+``` r
+model<-lm(lambda~log(nbr_remanent+1)+shannon+log(Proximiteforesti.re.+1)+log(Densiteforesti.re.+1)+Altitude+log(Annedeculture+1)+Typedesol+Precedentcultural, data=data4)
+summary(model)
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
+    ##     1) + log(Densiteforesti.re. + 1) + Altitude + log(Annedeculture + 
+    ##     1) + Typedesol + Precedentcultural, data = data4)
+    ## 
+    ## Residuals:
+    ##       Min        1Q    Median        3Q       Max 
+    ## -0.054859 -0.013633 -0.002287  0.010989  0.135133 
+    ## 
+    ## Coefficients:
+    ##                                 Estimate Std. Error t value Pr(>|t|)    
+    ## (Intercept)                    0.1128581  0.0599683   1.882   0.0636 .  
+    ## log(nbr_remanent + 1)          0.0158918  0.0038015   4.180 7.62e-05 ***
+    ## shannon                       -0.0073655  0.0107164  -0.687   0.4940    
+    ## log(Proximiteforesti.re. + 1) -0.0070113  0.0043621  -1.607   0.1121    
+    ## log(Densiteforesti.re. + 1)   -0.0038907  0.0108778  -0.358   0.7216    
+    ## Altitude                      -0.0002111  0.0002675  -0.789   0.4325    
+    ## log(Annedeculture + 1)        -0.0028257  0.0066846  -0.423   0.6737    
+    ## Typedesolsolhydromorphe       -0.0107970  0.0091441  -1.181   0.2413    
+    ## Precedentculturaligname        0.0171447  0.0173539   0.988   0.3263    
+    ## Precedentculturalmanioc        0.0242084  0.0131418   1.842   0.0693 .  
+    ## Precedentculturalma\357s       0.0198635  0.0142180   1.397   0.1664    
+    ## Precedentculturalriz          -0.0156545  0.0167485  -0.935   0.3529    
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.02944 on 77 degrees of freedom
+    ## Multiple R-squared:  0.4171, Adjusted R-squared:  0.3338 
+    ## F-statistic: 5.008 on 11 and 77 DF,  p-value: 7.745e-06
+
+``` r
+model1<-step(model)
+```
+
+    ## Start:  AIC=-616.43
+    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
+    ##     1) + log(Densiteforesti.re. + 1) + Altitude + log(Annedeculture + 
+    ##     1) + Typedesol + Precedentcultural
+    ## 
+    ##                                 Df Sum of Sq      RSS     AIC
+    ## - log(Densiteforesti.re. + 1)    1 0.0001109 0.066833 -618.28
+    ## - log(Annedeculture + 1)         1 0.0001548 0.066877 -618.23
+    ## - shannon                        1 0.0004093 0.067131 -617.89
+    ## - Altitude                       1 0.0005396 0.067261 -617.71
+    ## - Typedesol                      1 0.0012081 0.067930 -616.83
+    ## - Precedentcultural              4 0.0061828 0.072905 -616.54
+    ## <none>                                       0.066722 -616.43
+    ## - log(Proximiteforesti.re. + 1)  1 0.0022387 0.068960 -615.49
+    ## - log(nbr_remanent + 1)          1 0.0151433 0.081865 -600.23
+    ## 
+    ## Step:  AIC=-618.28
+    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
+    ##     1) + Altitude + log(Annedeculture + 1) + Typedesol + Precedentcultural
+    ## 
+    ##                                 Df Sum of Sq      RSS     AIC
+    ## - log(Annedeculture + 1)         1 0.0001653 0.066998 -620.06
+    ## - Altitude                       1 0.0004375 0.067270 -619.70
+    ## - shannon                        1 0.0005717 0.067404 -619.53
+    ## - Typedesol                      1 0.0010982 0.067931 -618.83
+    ## - Precedentcultural              4 0.0060991 0.072932 -618.51
+    ## <none>                                       0.066833 -618.28
+    ## - log(Proximiteforesti.re. + 1)  1 0.0023883 0.069221 -617.16
+    ## - log(nbr_remanent + 1)          1 0.0160928 0.082925 -601.08
+    ## 
+    ## Step:  AIC=-620.06
+    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
+    ##     1) + Altitude + Typedesol + Precedentcultural
+    ## 
+    ##                                 Df Sum of Sq      RSS     AIC
+    ## - Altitude                       1 0.0004401 0.067438 -621.48
+    ## - shannon                        1 0.0007358 0.067734 -621.09
+    ## - Typedesol                      1 0.0010031 0.068001 -620.74
+    ## <none>                                       0.066998 -620.06
+    ## - Precedentcultural              4 0.0077787 0.074777 -618.29
+    ## - log(Proximiteforesti.re. + 1)  1 0.0030674 0.070065 -618.08
+    ## - log(nbr_remanent + 1)          1 0.0165220 0.083520 -602.45
+    ## 
+    ## Step:  AIC=-621.48
+    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
+    ##     1) + Typedesol + Precedentcultural
+    ## 
+    ##                                 Df Sum of Sq      RSS     AIC
+    ## - Typedesol                      1 0.0005693 0.068007 -622.73
+    ## - shannon                        1 0.0006447 0.068083 -622.63
+    ## <none>                                       0.067438 -621.48
+    ## - Precedentcultural              4 0.0073583 0.074796 -620.26
+    ## - log(Proximiteforesti.re. + 1)  1 0.0030510 0.070489 -619.54
+    ## - log(nbr_remanent + 1)          1 0.0167694 0.084208 -603.72
+    ## 
+    ## Step:  AIC=-622.73
+    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
+    ##     1) + Precedentcultural
+    ## 
+    ##                                 Df Sum of Sq      RSS     AIC
+    ## - shannon                        1  0.000527 0.068534 -624.05
+    ## <none>                                       0.068007 -622.73
+    ## - log(Proximiteforesti.re. + 1)  1  0.003451 0.071458 -620.33
+    ## - Precedentcultural              4  0.010465 0.078473 -617.99
+    ## - log(nbr_remanent + 1)          1  0.016750 0.084758 -605.14
+    ## 
+    ## Step:  AIC=-624.05
+    ## lambda ~ log(nbr_remanent + 1) + log(Proximiteforesti.re. + 1) + 
+    ##     Precedentcultural
+    ## 
+    ##                                 Df Sum of Sq      RSS     AIC
+    ## <none>                                       0.068534 -624.05
+    ## - log(Proximiteforesti.re. + 1)  1 0.0031916 0.071726 -621.99
+    ## - Precedentcultural              4 0.0109972 0.079532 -618.80
+    ## - log(nbr_remanent + 1)          1 0.0164222 0.084957 -606.93
+
+``` r
+summary(model1)
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = lambda ~ log(nbr_remanent + 1) + log(Proximiteforesti.re. + 
+    ##     1) + Precedentcultural, data = data4)
+    ## 
+    ## Residuals:
+    ##       Min        1Q    Median        3Q       Max 
+    ## -0.051779 -0.015261 -0.003418  0.010121  0.142315 
+    ## 
+    ## Coefficients:
+    ##                                Estimate Std. Error t value Pr(>|t|)    
+    ## (Intercept)                    0.042162   0.010458   4.032 0.000123 ***
+    ## log(nbr_remanent + 1)          0.016176   0.003649   4.433 2.86e-05 ***
+    ## log(Proximiteforesti.re. + 1) -0.005368   0.002747  -1.954 0.054092 .  
+    ## Precedentculturaligname        0.023496   0.014883   1.579 0.118251    
+    ## Precedentculturalmanioc        0.029428   0.010615   2.772 0.006884 ** 
+    ## Precedentculturalma\357s       0.027724   0.011254   2.464 0.015850 *  
+    ## Precedentculturalriz          -0.006894   0.013999  -0.492 0.623725    
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.02891 on 82 degrees of freedom
+    ## Multiple R-squared:  0.4012, Adjusted R-squared:  0.3574 
+    ## F-statistic: 9.158 on 6 and 82 DF,  p-value: 1.151e-07
+
+Effect of the number of residual trees on Lambda
+
+``` r
+ggplot(data4, aes(log(nbr_remanent+1),lambda)) + geom_point() + geom_smooth() +
+    xlab("log(Number of residual trees +1)") + ylab("Recovery rate")
+```
+
+    ## `geom_smooth()` using method = 'loess'
+
+![](Carbon_files/figure-markdown_github/residual-1.png)
+
+Effect of the precedent crop
+
+``` r
+ggplot(data4, aes(x=Precedentcultural,y=lambda, fill=Precedentcultural)) + geom_boxplot() +
+    xlab("Precedent Crop") + ylab("Recovery rate")
+```
+
+![](Carbon_files/figure-markdown_github/crop-1.png)
 
 Discussion
 ----------

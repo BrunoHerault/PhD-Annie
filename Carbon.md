@@ -16,7 +16,7 @@ Anny E. N'Guessan, Justin Kassi N'Dja, Roselyne G. Z. Gouli, Camille Piponiot, O
     -   [Comparing secondary forests to logged and natural forests](#comparing-secondary-forests-to-logged-and-natural-forests-1)
     -   [Forest recovery rates](#forest-recovery-rates)
     -   [Environmental control on recovery rates](#environmental-control-on-recovery-rates)
--   [Discussion](#discussion)
+-   [Tuning for the paper](#tuning-for-the-paper)
 
 Introduction
 ------------
@@ -86,7 +86,7 @@ SPlot<-SPlot/0.2
 ########## Quadratic Diameter per plot
 DG<-sqrt(tapply((data1$D)^2,data1$plot,mean))
 #head(DG)
-########## Biomass Computation without remnant trees
+########## Biomass Computation without crop trees
 data2=data1[data1$rem==0,]
 AGBPlot2<-tapply(data2$AGB,data2$plot,sum)
 AGBPlot2ha=AGBPlot2/0.2
@@ -137,17 +137,17 @@ data3$categorie<-as.factor(data3$categorie)
 
 ``` r
 library(ggplot2)
-data_str<-data.frame(var=c(rep("AGB",dim(data3)[1]),rep("N trees",dim(data3)[1]),rep("Quad Diam",dim(data3)[1]), rep("Basal area",dim(data3)[1])),value=c(data3$AGB,data3$N,data3$DG,data3$BA),type=rep(data3$categorie,4))
+data_str<-data.frame(var=c(rep("AboveGround Biomass",dim(data3)[1]),rep("Tree Density",dim(data3)[1]),rep("Quadratic Diameter",dim(data3)[1]), rep("Basal area",dim(data3)[1])),value=c(data3$AGB,data3$N,data3$DG,data3$BA),Forest_Age=rep(data3$categorie,4))
 data_str<-na.omit(data_str)
 var<-levels(data_str$var)
 data_str$var<-as.character(data_str$var)
 for (i in var){
 data_str[data_str$var== i,]$var<-paste(i," (P<", 0.001, ")", sep="")}
 p <- ggplot(data = data_str, aes(x=var, y=value)) + 
-  geom_boxplot(aes(fill=type)) +
-  theme(axis.text.x=element_blank(), axis.title.x=element_blank()) #+
+  geom_boxplot(aes(fill=Forest_Age)) +
+  theme(axis.text.x=element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()) #+
   #coord_flip()
-p + facet_wrap( ~ var, scales="free")
+p + facet_wrap( ~ var, scales="free") + scale_fill_brewer("Forest_Age", palette="YlOrRd")
 ```
 
 ![](Carbon_files/figure-markdown_github/Fig1-1.png)
@@ -155,8 +155,14 @@ p + facet_wrap( ~ var, scales="free")
 ### Forest recovery rates
 
 ``` r
-agbmax<-quantile(data3[data3$categorie %in% c("e. Old Growth"),]$AGB, 0.75)
+agbmax<-quantile(data3[data3$categorie %in% c("e. Old Growth"),]$AGB, 0.5)
 data4<-data3[!data3$categorie %in% c("e. Old Growth"),]
+data4$Precedentcultural<-as.character(data4$Precedentcultural)
+data4[data4$Precedentcultural=="cacao",]$Precedentcultural<-"3-Cocoa"
+data4[data4$Precedentcultural=="igname",]$Precedentcultural<-"5-Yam"
+data4[data4$Precedentcultural=="manioc",]$Precedentcultural<-"4-Cassava"
+data4[data4$Precedentcultural=="ma\357s",]$Precedentcultural<-"2-Maize"
+data4[data4$Precedentcultural=="riz",]$Precedentcultural<-"1-Rice"
 data5<-data3[data3$categorie %in% c("e. Old Growth"),]
 data5$age<-200
 data4$lambda<- -log(1-(data4$AGB/agbmax))/((data4$age/10)^2)
@@ -164,17 +170,75 @@ q<-quantile(data4$lambda, probs=c(0.05, 0.5, 0.95))
 ```
 
 ``` r
-library(ggplot2)
+library(rstan)
+```
+
+    ## Loading required package: StanHeaders
+
+    ## rstan (Version 2.17.3, GitRev: 2e1f913d3ca3)
+
+    ## For execution on a local, multicore CPU with excess RAM we recommend calling
+    ## options(mc.cores = parallel::detectCores()).
+    ## To avoid recompilation of unchanged Stan programs, we recommend calling
+    ## rstan_options(auto_write = TRUE)
+
+``` r
+# rate <- stan(file="rate.stan", 
+#                      data=list(N=length(data4$N), AGB=data4$AGB, t=data4$age), 
+#                      pars=c("alpha", "beta", "lambda", "k", "sigma"), 
+#                      chains=1, 
+#                      iter=2500, 
+#                      warmup=1000)
+# save(rate, file="rate.Rdata")
+load(file="rate.Rdata")
+traceplot(rate, pars=c("alpha", "beta", "k", "lambda", "sigma"), nrow=2)
+```
+
+![](Carbon_files/figure-markdown_github/stan-1.png)
+
+``` r
+plot(rate)
+```
+
+    ## ci_level: 0.8 (80% intervals)
+
+    ## outer_level: 0.95 (95% intervals)
+
+![](Carbon_files/figure-markdown_github/stan-2.png)
+
+``` r
+par<-extract(rate)
 age<-1:200
-newdata <- data.frame(age=age, med=agbmax*(1-exp(-q[2]*((age/10)^2))), q05=agbmax*(1-exp(-q[1]*((age/10)^2))),
-                    q95= agbmax*(1-exp(-q[3]*((age/10)^2))))
+med<-numeric()
+q05<-numeric()
+q95<-numeric()
+for (i in age){
+med<-c(med,median(
+  par$alpha*(1-exp(-par$lambda*((i/par$k)^par$beta)))
+  ))
+q05<-c(q05,quantile(
+  par$alpha*(1-exp(-par$lambda*((i/par$k)^par$beta)))
+  , probs=0.001))
+q95<-c(q95,quantile(
+ par$alpha*(1-exp(-par$lambda*((i/par$k)^par$beta)))
+  , probs=0.999))
+}
+
+data4$lambda<--log(1-(data4$AGB/par$alpha[which(par$lp__ ==max(par$lp__))]))/((data4$age/par$k[which(par$lp__ == max(par$lp__))])^par$beta[which(par$lp__ == max(par$lp__))])
+```
+
+``` r
+library(ggplot2)
+newdata <- data.frame(age=age, med=med, q05=q05,
+                    q95= q95)
 ggplot() +
   geom_ribbon(data=newdata, aes(x=age, ymin = q05, ymax = q95), alpha = .25)+
   geom_point(data=data4, aes(x = age, y=AGB))+
-  geom_point(data=data5, aes(x=age, y=AGB, colour="red"))+
+  geom_line(data=newdata, aes(x=age, y=med))+
+  geom_boxplot(data=data5, aes(x=age, y=AGB), width=0.1)+  
   scale_y_sqrt()+
   scale_x_log10()+
-  xlab("Age of Secondary Forest (yr)") + ylab("Aboveground Biomass (T/ha)")
+  xlab("Age of Secondary Forest (yr)") + ylab("Aboveground Biomass (T/ha)") + theme(legend.position=" none")
 ```
 
 ![](Carbon_files/figure-markdown_github/fig2-1.png)
@@ -197,163 +261,225 @@ str(data4)
     ##  $ Annedeculture       : int  2 2 3 10 3 3 3 6 10 10 ...
     ##  $ Typedesol           : Factor w/ 2 levels "solferralitique",..: 1 2 2 1 1 1 1 1 1 1 ...
     ##  $ Topographie         : Factor w/ 7 levels "bas fond","bas pente",..: 7 1 6 5 5 5 7 5 5 5 ...
-    ##  $ Precedentcultural   : Factor w/ 5 levels "cacao","igname",..: 3 5 1 1 3 1 3 1 1 1 ...
+    ##  $ Precedentcultural   : chr  "4-Cassava" "1-Rice" "3-Cocoa" "3-Cocoa" ...
     ##  $ AGB                 : num  12.729 0.753 146.648 52.435 3.846 ...
     ##  $ N                   : num  1285 285 1765 1790 1485 ...
     ##  $ BA                  : num  7.71 2.12 48.26 17.61 4.35 ...
     ##  $ DG                  : num  8.74 9.73 18.66 11.19 6.11 ...
-    ##  $ lambda              : num  0.0279 0.0219 0.0714 0.0334 0.0404 ...
+    ##  $ lambda              : num  0.0632 0.0343 0.2091 0.0909 0.0731 ...
 
 ``` r
-model<-lm(lambda~log(nbr_remanent+1)+shannon+log(Proximiteforesti.re.+1)+log(Densiteforesti.re.+1)+Altitude+log(Annedeculture+1)+Typedesol+Precedentcultural, data=data4)
+summary(lm(lambda~log(nbr_remanent+1), data=data4, weights=data4$age))
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = lambda ~ log(nbr_remanent + 1), data = data4, weights = data4$age)
+    ## 
+    ## Weighted Residuals:
+    ##     Min      1Q  Median      3Q     Max 
+    ## -0.3453 -0.1618 -0.0411  0.1080  0.7816 
+    ## 
+    ## Coefficients:
+    ##                       Estimate Std. Error t value Pr(>|t|)    
+    ## (Intercept)           0.086094   0.006972  12.349  < 2e-16 ***
+    ## log(nbr_remanent + 1) 0.020080   0.005409   3.712 0.000362 ***
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.1984 on 87 degrees of freedom
+    ## Multiple R-squared:  0.1367, Adjusted R-squared:  0.1268 
+    ## F-statistic: 13.78 on 1 and 87 DF,  p-value: 0.0003617
+
+``` r
+#summary(lm(lambda~Proximiteforesti.re., data=data4, weights=data4$age))
+summary(lm(lambda~Precedentcultural, data=data4, weights=data4$age))
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = lambda ~ Precedentcultural, data = data4, weights = data4$age)
+    ## 
+    ## Weighted Residuals:
+    ##      Min       1Q   Median       3Q      Max 
+    ## -0.34518 -0.12246 -0.04562  0.09137  0.74705 
+    ## 
+    ## Coefficients:
+    ##                            Estimate Std. Error t value Pr(>|t|)  
+    ## (Intercept)                 0.03817    0.02868   1.331   0.1869  
+    ## Precedentcultural2-Maize    0.09331    0.04076   2.290   0.0246 *
+    ## Precedentcultural3-Cocoa    0.06619    0.02926   2.262   0.0263 *
+    ## Precedentcultural4-Cassava  0.06922    0.03615   1.915   0.0589 .
+    ## Precedentcultural5-Yam      0.09426    0.04314   2.185   0.0317 *
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.2088 on 84 degrees of freedom
+    ## Multiple R-squared:  0.07667,    Adjusted R-squared:  0.0327 
+    ## F-statistic: 1.744 on 4 and 84 DF,  p-value: 0.148
+
+``` r
+#summary(lm(lambda~log(Densiteforesti.re.+1), data=data4, weights=data4$age))
+#summary(lm(lambda~Typedesol, data=data4, weights=data4$age))
+#summary(lm(lambda~Altitude, data=data4, weights=data4$age))
+#summary(lm(lambda~log(Annedeculture+1), data=data4, weights=data4$age))
+model<-lm(lambda~log(nbr_remanent+1)+Precedentcultural, data=data4)
 summary(model)
 ```
 
     ## 
     ## Call:
-    ## lm(formula = lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
-    ##     1) + log(Densiteforesti.re. + 1) + Altitude + log(Annedeculture + 
-    ##     1) + Typedesol + Precedentcultural, data = data4)
+    ## lm(formula = lambda ~ log(nbr_remanent + 1) + Precedentcultural, 
+    ##     data = data4)
     ## 
     ## Residuals:
-    ##       Min        1Q    Median        3Q       Max 
-    ## -0.054859 -0.013633 -0.002287  0.010989  0.135133 
+    ##      Min       1Q   Median       3Q      Max 
+    ## -0.09105 -0.03492 -0.00680  0.03175  0.30592 
     ## 
     ## Coefficients:
-    ##                                 Estimate Std. Error t value Pr(>|t|)    
-    ## (Intercept)                    0.1128581  0.0599683   1.882   0.0636 .  
-    ## log(nbr_remanent + 1)          0.0158918  0.0038015   4.180 7.62e-05 ***
-    ## shannon                       -0.0073655  0.0107164  -0.687   0.4940    
-    ## log(Proximiteforesti.re. + 1) -0.0070113  0.0043621  -1.607   0.1121    
-    ## log(Densiteforesti.re. + 1)   -0.0038907  0.0108778  -0.358   0.7216    
-    ## Altitude                      -0.0002111  0.0002675  -0.789   0.4325    
-    ## log(Annedeculture + 1)        -0.0028257  0.0066846  -0.423   0.6737    
-    ## Typedesolsolhydromorphe       -0.0107970  0.0091441  -1.181   0.2413    
-    ## Precedentculturaligname        0.0171447  0.0173539   0.988   0.3263    
-    ## Precedentculturalmanioc        0.0242084  0.0131418   1.842   0.0693 .  
-    ## Precedentculturalma\357s       0.0198635  0.0142180   1.397   0.1664    
-    ## Precedentculturalriz          -0.0156545  0.0167485  -0.935   0.3529    
+    ##                            Estimate Std. Error t value Pr(>|t|)   
+    ## (Intercept)                 0.01671    0.02509   0.666  0.50747   
+    ## log(nbr_remanent + 1)       0.02107    0.00699   3.014  0.00342 **
+    ## Precedentcultural2-Maize    0.05731    0.03090   1.855  0.06718 . 
+    ## Precedentcultural3-Cocoa    0.06640    0.02544   2.610  0.01074 * 
+    ## Precedentcultural4-Cassava  0.08175    0.03113   2.626  0.01029 * 
+    ## Precedentcultural5-Yam      0.07903    0.03740   2.113  0.03760 * 
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
     ## 
-    ## Residual standard error: 0.02944 on 77 degrees of freedom
-    ## Multiple R-squared:  0.4171, Adjusted R-squared:  0.3338 
-    ## F-statistic: 5.008 on 11 and 77 DF,  p-value: 7.745e-06
+    ## Residual standard error: 0.05922 on 83 degrees of freedom
+    ## Multiple R-squared:  0.2185, Adjusted R-squared:  0.1714 
+    ## F-statistic: 4.641 on 5 and 83 DF,  p-value: 0.0008752
 
 ``` r
-model1<-step(model)
+anova(model)
 ```
 
-    ## Start:  AIC=-616.43
-    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
-    ##     1) + log(Densiteforesti.re. + 1) + Altitude + log(Annedeculture + 
-    ##     1) + Typedesol + Precedentcultural
+    ## Analysis of Variance Table
     ## 
-    ##                                 Df Sum of Sq      RSS     AIC
-    ## - log(Densiteforesti.re. + 1)    1 0.0001109 0.066833 -618.28
-    ## - log(Annedeculture + 1)         1 0.0001548 0.066877 -618.23
-    ## - shannon                        1 0.0004093 0.067131 -617.89
-    ## - Altitude                       1 0.0005396 0.067261 -617.71
-    ## - Typedesol                      1 0.0012081 0.067930 -616.83
-    ## - Precedentcultural              4 0.0061828 0.072905 -616.54
-    ## <none>                                       0.066722 -616.43
-    ## - log(Proximiteforesti.re. + 1)  1 0.0022387 0.068960 -615.49
-    ## - log(nbr_remanent + 1)          1 0.0151433 0.081865 -600.23
-    ## 
-    ## Step:  AIC=-618.28
-    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
-    ##     1) + Altitude + log(Annedeculture + 1) + Typedesol + Precedentcultural
-    ## 
-    ##                                 Df Sum of Sq      RSS     AIC
-    ## - log(Annedeculture + 1)         1 0.0001653 0.066998 -620.06
-    ## - Altitude                       1 0.0004375 0.067270 -619.70
-    ## - shannon                        1 0.0005717 0.067404 -619.53
-    ## - Typedesol                      1 0.0010982 0.067931 -618.83
-    ## - Precedentcultural              4 0.0060991 0.072932 -618.51
-    ## <none>                                       0.066833 -618.28
-    ## - log(Proximiteforesti.re. + 1)  1 0.0023883 0.069221 -617.16
-    ## - log(nbr_remanent + 1)          1 0.0160928 0.082925 -601.08
-    ## 
-    ## Step:  AIC=-620.06
-    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
-    ##     1) + Altitude + Typedesol + Precedentcultural
-    ## 
-    ##                                 Df Sum of Sq      RSS     AIC
-    ## - Altitude                       1 0.0004401 0.067438 -621.48
-    ## - shannon                        1 0.0007358 0.067734 -621.09
-    ## - Typedesol                      1 0.0010031 0.068001 -620.74
-    ## <none>                                       0.066998 -620.06
-    ## - Precedentcultural              4 0.0077787 0.074777 -618.29
-    ## - log(Proximiteforesti.re. + 1)  1 0.0030674 0.070065 -618.08
-    ## - log(nbr_remanent + 1)          1 0.0165220 0.083520 -602.45
-    ## 
-    ## Step:  AIC=-621.48
-    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
-    ##     1) + Typedesol + Precedentcultural
-    ## 
-    ##                                 Df Sum of Sq      RSS     AIC
-    ## - Typedesol                      1 0.0005693 0.068007 -622.73
-    ## - shannon                        1 0.0006447 0.068083 -622.63
-    ## <none>                                       0.067438 -621.48
-    ## - Precedentcultural              4 0.0073583 0.074796 -620.26
-    ## - log(Proximiteforesti.re. + 1)  1 0.0030510 0.070489 -619.54
-    ## - log(nbr_remanent + 1)          1 0.0167694 0.084208 -603.72
-    ## 
-    ## Step:  AIC=-622.73
-    ## lambda ~ log(nbr_remanent + 1) + shannon + log(Proximiteforesti.re. + 
-    ##     1) + Precedentcultural
-    ## 
-    ##                                 Df Sum of Sq      RSS     AIC
-    ## - shannon                        1  0.000527 0.068534 -624.05
-    ## <none>                                       0.068007 -622.73
-    ## - log(Proximiteforesti.re. + 1)  1  0.003451 0.071458 -620.33
-    ## - Precedentcultural              4  0.010465 0.078473 -617.99
-    ## - log(nbr_remanent + 1)          1  0.016750 0.084758 -605.14
-    ## 
-    ## Step:  AIC=-624.05
-    ## lambda ~ log(nbr_remanent + 1) + log(Proximiteforesti.re. + 1) + 
-    ##     Precedentcultural
-    ## 
-    ##                                 Df Sum of Sq      RSS     AIC
-    ## <none>                                       0.068534 -624.05
-    ## - log(Proximiteforesti.re. + 1)  1 0.0031916 0.071726 -621.99
-    ## - Precedentcultural              4 0.0109972 0.079532 -618.80
-    ## - log(nbr_remanent + 1)          1 0.0164222 0.084957 -606.93
-
-``` r
-summary(model1)
-```
-
-    ## 
-    ## Call:
-    ## lm(formula = lambda ~ log(nbr_remanent + 1) + log(Proximiteforesti.re. + 
-    ##     1) + Precedentcultural, data = data4)
-    ## 
-    ## Residuals:
-    ##       Min        1Q    Median        3Q       Max 
-    ## -0.051779 -0.015261 -0.003418  0.010121  0.142315 
-    ## 
-    ## Coefficients:
-    ##                                Estimate Std. Error t value Pr(>|t|)    
-    ## (Intercept)                    0.042162   0.010458   4.032 0.000123 ***
-    ## log(nbr_remanent + 1)          0.016176   0.003649   4.433 2.86e-05 ***
-    ## log(Proximiteforesti.re. + 1) -0.005368   0.002747  -1.954 0.054092 .  
-    ## Precedentculturaligname        0.023496   0.014883   1.579 0.118251    
-    ## Precedentculturalmanioc        0.029428   0.010615   2.772 0.006884 ** 
-    ## Precedentculturalma\357s       0.027724   0.011254   2.464 0.015850 *  
-    ## Precedentculturalriz          -0.006894   0.013999  -0.492 0.623725    
+    ## Response: lambda
+    ##                       Df   Sum Sq  Mean Sq F value    Pr(>F)    
+    ## log(nbr_remanent + 1)  1 0.052092 0.052092 14.8515 0.0002284 ***
+    ## Precedentcultural      4 0.029302 0.007325  2.0885 0.0896098 .  
+    ## Residuals             83 0.291125 0.003508                      
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-    ## 
-    ## Residual standard error: 0.02891 on 82 degrees of freedom
-    ## Multiple R-squared:  0.4012, Adjusted R-squared:  0.3574 
-    ## F-statistic: 9.158 on 6 and 82 DF,  p-value: 1.151e-07
+
+``` r
+remnant<-data.frame(Age=rep(seq(1,200,1),6))
+remnant$remnants<-as.factor(c(rep("000",200),rep("001",200),rep("005",200), rep("020",200), rep("050",200), rep("100",200)))
+remnant$AGB<- -2
+remnant$AGBmin<- -2
+remnant$AGBmax<- -2
+remnant$dAGB<- -2
+remnant$dAGBmin<- -2
+remnant$dAGBmax<- -2
+
+alpha<-par$alpha[which(par$lp__ == max(par$lp__))]
+beta<-par$beta[which(par$lp__ == max(par$lp__))]
+k<-par$k[which(par$lp__ == max(par$lp__))]
+lambda<-mean(model$coefficients[1]+model$coefficients[c(1,3:6)])
+mu_rem<-model$coefficients[2]
+sd_rem<-summary(model)[["coefficients"]][2,2]
+remnant[remnant$remnants=="000",]$AGB<-alpha*(1-exp(-(lambda+log(0+1)*(mu_rem))*((remnant[remnant$remnants=="000",]$Age/k)^beta)))
+remnant[remnant$remnants=="000",]$AGBmin<-alpha*(1-exp(-(lambda+log(0+1)*(mu_rem-2*sd_rem))*((remnant[remnant$remnants=="000",]$Age/k)^beta)))
+remnant[remnant$remnants=="000",]$AGBmax<-alpha*(1-exp(-(lambda+log(0+1)*(mu_rem+2*sd_rem))*((remnant[remnant$remnants=="000",]$Age/k)^beta)))
+remnant[remnant$remnants=="001",]$AGB<-alpha*(1-exp(-(lambda+log(0.2+1)*(mu_rem))*((remnant[remnant$remnants=="001",]$Age/k)^beta)))
+remnant[remnant$remnants=="001",]$AGBmin<-alpha*(1-exp(-(lambda+log(0.2+1)*(mu_rem-2*sd_rem))*((remnant[remnant$remnants=="001",]$Age/k)^beta)))
+remnant[remnant$remnants=="001",]$AGBmax<-alpha*(1-exp(-(lambda+log(0.2+1)*(mu_rem+2*sd_rem))*((remnant[remnant$remnants=="001",]$Age/k)^beta)))
+remnant[remnant$remnants=="005",]$AGB<-alpha*(1-exp(-(lambda+log(1+1)*(mu_rem))*((remnant[remnant$remnants=="005",]$Age/k)^beta)))
+remnant[remnant$remnants=="005",]$AGBmin<-alpha*(1-exp(-(lambda+log(1+1)*(mu_rem-2*sd_rem))*((remnant[remnant$remnants=="005",]$Age/k)^beta)))
+remnant[remnant$remnants=="005",]$AGBmax<-alpha*(1-exp(-(lambda+log(1+1)*(mu_rem+2*sd_rem))*((remnant[remnant$remnants=="005",]$Age/k)^beta)))
+remnant[remnant$remnants=="020",]$AGB<-alpha*(1-exp(-(lambda+log(4+1)*(mu_rem))*((remnant[remnant$remnants=="020",]$Age/k)^beta)))
+remnant[remnant$remnants=="020",]$AGBmin<-alpha*(1-exp(-(lambda+log(4+1)*(mu_rem-2*sd_rem))*((remnant[remnant$remnants=="020",]$Age/k)^beta)))
+remnant[remnant$remnants=="020",]$AGBmax<-alpha*(1-exp(-(lambda+log(4+1)*(mu_rem+2*sd_rem))*((remnant[remnant$remnants=="020",]$Age/k)^beta)))
+remnant[remnant$remnants=="050",]$AGB<-alpha*(1-exp(-(lambda+log(10+1)*(mu_rem))*((remnant[remnant$remnants=="050",]$Age/k)^beta)))
+remnant[remnant$remnants=="050",]$AGBmin<-alpha*(1-exp(-(lambda+log(10+1)*(mu_rem-2*sd_rem))*((remnant[remnant$remnants=="050",]$Age/k)^beta)))
+remnant[remnant$remnants=="050",]$AGBmax<-alpha*(1-exp(-(lambda+log(10+1)*(mu_rem+2*sd_rem))*((remnant[remnant$remnants=="050",]$Age/k)^beta)))
+remnant[remnant$remnants=="100",]$AGB<-alpha*(1-exp(-(lambda+log(25+1)*(mu_rem))*((remnant[remnant$remnants=="100",]$Age/k)^beta)))
+remnant[remnant$remnants=="100",]$AGBmin<-alpha*(1-exp(-(lambda+log(25+1)*(mu_rem-2*sd_rem))*((remnant[remnant$remnants=="100",]$Age/k)^beta)))
+remnant[remnant$remnants=="100",]$AGBmax<-alpha*(1-exp(-(lambda+log(25+1)*(mu_rem+2*sd_rem))*((remnant[remnant$remnants=="100",]$Age/k)^beta)))
+
+remnant[remnant$remnants=="000",]$dAGB<-(c(remnant[remnant$remnants=="000",]$AGB,0)-c(0, remnant[remnant$remnants=="000",]$AGB))[1:200]
+remnant[remnant$remnants=="001",]$dAGB<-(c(remnant[remnant$remnants=="001",]$AGB,0)-c(0, remnant[remnant$remnants=="001",]$AGB))[1:200]
+remnant[remnant$remnants=="005",]$dAGB<-(c(remnant[remnant$remnants=="005",]$AGB,0)-c(0, remnant[remnant$remnants=="005",]$AGB))[1:200]
+remnant[remnant$remnants=="020",]$dAGB<-(c(remnant[remnant$remnants=="020",]$AGB,0)-c(0, remnant[remnant$remnants=="020",]$AGB))[1:200]
+remnant[remnant$remnants=="050",]$dAGB<-(c(remnant[remnant$remnants=="050",]$AGB,0)-c(0, remnant[remnant$remnants=="050",]$AGB))[1:200]
+remnant[remnant$remnants=="100",]$dAGB<-(c(remnant[remnant$remnants=="100",]$AGB,0)-c(0, remnant[remnant$remnants=="100",]$AGB))[1:200]
+remnant[remnant$remnants=="000",]$dAGBmin<-(c(remnant[remnant$remnants=="000",]$AGBmin,0)-c(0, remnant[remnant$remnants=="000",]$AGBmin))[1:200]
+remnant[remnant$remnants=="001",]$dAGBmin<-(c(remnant[remnant$remnants=="001",]$AGBmin,0)-c(0, remnant[remnant$remnants=="001",]$AGBmin))[1:200]
+remnant[remnant$remnants=="005",]$dAGBmin<-(c(remnant[remnant$remnants=="005",]$AGBmin,0)-c(0, remnant[remnant$remnants=="005",]$AGBmin))[1:200]
+remnant[remnant$remnants=="020",]$dAGBmin<-(c(remnant[remnant$remnants=="020",]$AGBmin,0)-c(0, remnant[remnant$remnants=="020",]$AGBmin))[1:200]
+remnant[remnant$remnants=="050",]$dAGBmin<-(c(remnant[remnant$remnants=="050",]$AGBmin,0)-c(0, remnant[remnant$remnants=="050",]$AGBmin))[1:200]
+remnant[remnant$remnants=="100",]$dAGBmin<-(c(remnant[remnant$remnants=="100",]$AGBmin,0)-c(0, remnant[remnant$remnants=="100",]$AGBmin))[1:200]
+remnant[remnant$remnants=="000",]$dAGBmax<-(c(remnant[remnant$remnants=="000",]$AGBmax,0)-c(0, remnant[remnant$remnants=="000",]$AGBmax))[1:200]
+remnant[remnant$remnants=="001",]$dAGBmax<-(c(remnant[remnant$remnants=="001",]$AGBmax,0)-c(0, remnant[remnant$remnants=="001",]$AGBmax))[1:200]
+remnant[remnant$remnants=="005",]$dAGBmax<-(c(remnant[remnant$remnants=="005",]$AGBmax,0)-c(0, remnant[remnant$remnants=="005",]$AGBmax))[1:200]
+remnant[remnant$remnants=="020",]$dAGBmax<-(c(remnant[remnant$remnants=="020",]$AGBmax,0)-c(0, remnant[remnant$remnants=="020",]$AGBmax))[1:200]
+remnant[remnant$remnants=="050",]$dAGBmax<-(c(remnant[remnant$remnants=="050",]$AGBmax,0)-c(0, remnant[remnant$remnants=="050",]$AGBmax))[1:200]
+remnant[remnant$remnants=="100",]$dAGBmax<-(c(remnant[remnant$remnants=="100",]$AGBmax,0)-c(0, remnant[remnant$remnants=="100",]$AGBmax))[1:200]
+
+crop<-data.frame(Age=rep(seq(1,200,1),5))
+crop$crops<-as.factor(c(rep("1-Rice",200),rep("2-Maize",200),rep("3-Cocoa",200), rep("4-Cassava",200), rep("5-Yam",200)))
+crop$AGB<- -2
+crop$AGBmin<- -2
+crop$AGBmax<- -2
+crop$dAGB<- -2
+crop$dAGBmin<- -2
+crop$dAGBmax<- -2
+
+lambda<-model$coefficients[2]*log(mean(data4$nbr_remanent)+1)
+mu_crop<-c(model$coefficients[1], model$coefficients[1]+model$coefficients[3:6])
+sd_crop<-summary(model)[["coefficients"]][c(1, 3:6),2]
+crop[crop$crops=="1-Rice",]$AGB<-alpha*(1-exp(-(lambda+mu_crop[1])*((crop[crop$crops=="1-Rice",]$Age/k)^beta)))
+crop[crop$crops=="1-Rice",]$AGBmin<-alpha*(1-exp(-(lambda+mu_crop[1]-2*sd_crop[1])*((crop[crop$crops=="1-Rice",]$Age/k)^beta)))
+crop[crop$crops=="1-Rice",]$AGBmax<-alpha*(1-exp(-(lambda+mu_crop[1]+2*sd_crop[1])*((crop[crop$crops=="1-Rice",]$Age/k)^beta)))
+crop[crop$crops=="2-Maize",]$AGB<-alpha*(1-exp(-(lambda+mu_crop[2])*((crop[crop$crops=="2-Maize",]$Age/k)^beta)))
+crop[crop$crops=="2-Maize",]$AGBmin<-alpha*(1-exp(-(lambda+mu_crop[2]-2*sd_crop[2])*((crop[crop$crops=="2-Maize",]$Age/k)^beta)))
+crop[crop$crops=="2-Maize",]$AGBmax<-alpha*(1-exp(-(lambda+mu_crop[2]+2*sd_crop[2])*((crop[crop$crops=="2-Maize",]$Age/k)^beta)))
+crop[crop$crops=="3-Cocoa",]$AGB<-alpha*(1-exp(-(lambda+mu_crop[3])*((crop[crop$crops=="3-Cocoa",]$Age/k)^beta)))
+crop[crop$crops=="3-Cocoa",]$AGBmin<-alpha*(1-exp(-(lambda+mu_crop[3]-2*sd_crop[3])*((crop[crop$crops=="3-Cocoa",]$Age/k)^beta)))
+crop[crop$crops=="3-Cocoa",]$AGBmax<-alpha*(1-exp(-(lambda+mu_crop[3]+2*sd_crop[3])*((crop[crop$crops=="3-Cocoa",]$Age/k)^beta)))
+crop[crop$crops=="4-Cassava",]$AGB<-alpha*(1-exp(-(lambda+mu_crop[4])*((crop[crop$crops=="4-Cassava",]$Age/k)^beta)))
+crop[crop$crops=="4-Cassava",]$AGBmin<-alpha*(1-exp(-(lambda+mu_crop[4]-2*sd_crop[4])*((crop[crop$crops=="4-Cassava",]$Age/k)^beta)))
+crop[crop$crops=="4-Cassava",]$AGBmax<-alpha*(1-exp(-(lambda+mu_crop[4]+2*sd_crop[4])*((crop[crop$crops=="4-Cassava",]$Age/k)^beta)))
+crop[crop$crops=="5-Yam",]$AGB<-alpha*(1-exp(-(lambda+mu_crop[5])*((crop[crop$crops=="5-Yam",]$Age/k)^beta)))
+crop[crop$crops=="5-Yam",]$AGBmin<-alpha*(1-exp(-(lambda+mu_crop[5]-2*sd_crop[5])*((crop[crop$crops=="5-Yam",]$Age/k)^beta)))
+crop[crop$crops=="5-Yam",]$AGBmax<-alpha*(1-exp(-(lambda+mu_crop[5]+2*sd_crop[5])*((crop[crop$crops=="5-Yam",]$Age/k)^beta)))
+
+crop[crop$crops=="1-Rice",]$dAGB<-(c(crop[crop$crops=="1-Rice",]$AGB,0)-c(0, crop[crop$crops=="1-Rice",]$AGB))[1:200]
+crop[crop$crops=="2-Maize",]$dAGB<-(c(crop[crop$crops=="2-Maize",]$AGB,0)-c(0, crop[crop$crops=="2-Maize",]$AGB))[1:200]
+crop[crop$crops=="3-Cocoa",]$dAGB<-(c(crop[crop$crops=="3-Cocoa",]$AGB,0)-c(0, crop[crop$crops=="3-Cocoa",]$AGB))[1:200]
+crop[crop$crops=="4-Cassava",]$dAGB<-(c(crop[crop$crops=="4-Cassava",]$AGB,0)-c(0, crop[crop$crops=="4-Cassava",]$AGB))[1:200]
+crop[crop$crops=="5-Yam",]$dAGB<-(c(crop[crop$crops=="5-Yam",]$AGB,0)-c(0, crop[crop$crops=="5-Yam",]$AGB))[1:200]
+crop[crop$crops=="1-Rice",]$dAGBmin<-(c(crop[crop$crops=="1-Rice",]$AGBmin,0)-c(0, crop[crop$crops=="1-Rice",]$AGBmin))[1:200]
+crop[crop$crops=="2-Maize",]$dAGBmin<-(c(crop[crop$crops=="2-Maize",]$AGBmin,0)-c(0, crop[crop$crops=="2-Maize",]$AGBmin))[1:200]
+crop[crop$crops=="3-Cocoa",]$dAGBmin<-(c(crop[crop$crops=="3-Cocoa",]$AGBmin,0)-c(0, crop[crop$crops=="3-Cocoa",]$AGBmin))[1:200]
+crop[crop$crops=="4-Cassava",]$dAGBmin<-(c(crop[crop$crops=="4-Cassava",]$AGBmin,0)-c(0, crop[crop$crops=="4-Cassava",]$AGBmin))[1:200]
+crop[crop$crops=="5-Yam",]$dAGBmin<-(c(crop[crop$crops=="5-Yam",]$AGBmin,0)-c(0, crop[crop$crops=="5-Yam",]$AGBmin))[1:200]
+crop[crop$crops=="1-Rice",]$dAGBmax<-(c(crop[crop$crops=="1-Rice",]$AGBmax,0)-c(0, crop[crop$crops=="1-Rice",]$AGBmax))[1:200]
+crop[crop$crops=="2-Maize",]$dAGBmax<-(c(crop[crop$crops=="2-Maize",]$AGBmax,0)-c(0, crop[crop$crops=="2-Maize",]$AGBmax))[1:200]
+crop[crop$crops=="3-Cocoa",]$dAGBmax<-(c(crop[crop$crops=="3-Cocoa",]$AGBmax,0)-c(0, crop[crop$crops=="3-Cocoa",]$AGBmax))[1:200]
+crop[crop$crops=="4-Cassava",]$dAGBmax<-(c(crop[crop$crops=="4-Cassava",]$AGBmax,0)-c(0, crop[crop$crops=="4-Cassava",]$AGBmax))[1:200]
+crop[crop$crops=="5-Yam",]$dAGBmax<-(c(crop[crop$crops=="5-Yam",]$AGBmax,0)-c(0, crop[crop$crops=="5-Yam",]$AGBmax))[1:200]
+```
 
 Effect of the number of residual trees on Lambda
 
 ``` r
-ggplot(data4, aes(log(nbr_remanent+1),lambda)) + geom_point() + geom_smooth() +
-    xlab("log(Number of residual trees +1)") + ylab("Recovery rate")
+library(ggplot2)
+library(grid)
+library(gridExtra)
+plot1<-ggplot(data4, aes(nbr_remanent*4,lambda)) + geom_point() + geom_smooth(col="red") +
+    xlab("Number of Remnants") + ylab(c(expression(lambda~"obs"))) + scale_x_sqrt()
+
+plot2<-ggplot(remnant, aes(x=Age, y=dAGB, color=remnants)) +
+labs(x="Age of Secondary Forest (yr)", y=bquote('Biomass Flux (T.ha'^-1~.yr^-1~')'))+
+geom_ribbon(aes(x=Age, ymin = dAGBmin, ymax = dAGBmax,fill = remnants), alpha=0.15, colour=NA)+
+geom_line(alpha=1, size=1) +
+scale_color_brewer("remnants", palette="YlOrRd")+
+scale_fill_brewer("remnants", palette="YlOrRd")
+plot3 <- grid.arrange(plot1, plot2, widths=c(2.1/5, 2.9/5), ncol=2, nrow=1)
 ```
 
     ## `geom_smooth()` using method = 'loess'
@@ -363,11 +489,25 @@ ggplot(data4, aes(log(nbr_remanent+1),lambda)) + geom_point() + geom_smooth() +
 Effect of the precedent crop
 
 ``` r
-ggplot(data4, aes(x=Precedentcultural,y=lambda, fill=Precedentcultural)) + geom_boxplot() +
-    xlab("Precedent Crop") + ylab("Recovery rate")
+library(ggplot2)
+library(grid)
+library(gridExtra)
+
+plot4<-ggplot(data4, aes(x=Precedentcultural,y=lambda, fill=Precedentcultural)) + geom_boxplot() +
+    xlab("Preceding Crop") + ylab(c(expression(lambda~"obs"))) + theme(legend.position=" none") + scale_fill_brewer(palette="YlOrRd")+
+  theme(axis.text.x = element_text(size=rel(0.8)))
+
+plot5<-ggplot(crop, aes(x=Age, y=dAGB, color=crops)) +
+labs(x="Age of Secondary Forest (yr)", y=bquote('Biomass Flux (T.ha'^-1~.yr^-1~')'))+
+geom_ribbon(aes(x=Age, ymin = dAGBmin, ymax = dAGBmax,fill = crops), alpha=0.15, colour=NA)+
+geom_line(alpha=1, size=1) +
+scale_color_brewer("crops", palette="YlOrRd")+
+scale_fill_brewer("crops", palette="YlOrRd")
+
+plot6 <- grid.arrange(plot4, plot5, widths=c(2.1/5, 2.9/5), ncol=2, nrow=1)
 ```
 
 ![](Carbon_files/figure-markdown_github/crop-1.png)
 
-Discussion
-----------
+Tuning for the paper
+--------------------
